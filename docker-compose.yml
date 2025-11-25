@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: plantpal-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-plantpal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-plantpal_password}
+      POSTGRES_DB: ${POSTGRES_DB:-plantpal}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U plantpal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - plantpal-network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    container_name: plantpal-api
+    environment:
+      PORT: 8080
+      ENV: development
+      DATABASE_URL: postgres://plantpal:plantpal_password@postgres:5432/plantpal?sslmode=disable
+      LOG_LEVEL: info
+      JWT_SECRET: your-secret-key-change-in-production
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
+    ports:
+      - "8080:8080"
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - /app/tmp
+    command: ["air", "-c", ".air.toml"]
+    develop:
+      watch:
+        - action: sync
+          path: .
+          target: /app
+          ignore:
+            - tmp/
+            - .git/
+            - vendor/
+            - bin/
+        - action: rebuild
+          path: go.mod
+        - action: rebuild
+          path: go.sum
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - plantpal-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  plantpal-network:
+    driver: bridge

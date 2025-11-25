@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,7 +12,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/j-gc/plantpal-backend/internal/modules/auth/application"
+	usershttp "github.com/j-gc/plantpal-backend/internal/modules/authinfrastructure/http"
+	"github.com/j-gc/plantpal-backend/internal/modules/authinfrastructure/persistence"
+	"github.com/j-gc/plantpal-backend/internal/modules/authinfrastructure/security"
 	"github.com/j-gc/plantpal-backend/internal/shared/config"
+	"github.com/j-gc/plantpal-backend/internal/shared/jwt"
 	"github.com/j-gc/plantpal-backend/internal/shared/logger"
 )
 
@@ -23,19 +31,35 @@ func main() {
 	}
 
 	// Initialize logger
-	logger := logger.New(cfg.LogLevel)
+	log := logger.New(cfg.LogLevel)
 
 	// Initialize database
-	// db, err := database.New(cfg.DatabaseURL)
-	// if err != nil {
-	// 	logger.Fatal("Failed to connect to database", "error", err)
-	// }
-	// defer db.Close()
+	db, err := sql.Open("pgx", cfg.DatabaseURL)
+	if err != nil {
+		log.Error("Failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	// Verify database connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		log.Error("Failed to ping database", "error", err)
+		os.Exit(1)
+	}
+	log.Info("Database connected successfully")
 
 	// Set Gin mode based on environment
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
+
+	// Initialize dependencies
+	userRepo := persistence.NewUserRepository(db)
+	hasher := security.NewBcryptHasher()
+	tokenIssuer := jwt.NewHS256Issuer(cfg.JWTSecret, "plantpal-backend")
+	userService := application.NewService(userRepo, hasher, tokenIssuer)
 
 	// Initialize Gin router
 	router := gin.Default()
@@ -45,11 +69,13 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// Setup routes
-	// api := router.Group("/api/v1")
-	// {
-	// 	// Register module routes here
-	// }
+	// Setup API routes
+	api := router.Group("/api/v1")
+	{
+		// Auth routes
+		authHandlers := usershttp.NewAuthHandlers(userService)
+		authHandlers.RegisterRoutes(api.Group("/auth"))
+	}
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
@@ -61,9 +87,10 @@ func main() {
 
 	// Start server
 	go func() {
-		logger.Info("Starting server", "port", cfg.Port)
+		log.Info("Starting server", "port", cfg.Port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("Server failed to start", "error", err)
+			log.Error("Server failed to start", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -72,14 +99,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	logger.Info("Shutting down server...")
+	log.Info("Shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		logger.Fatal("Server forced to shutdown", "error", err)
+		log.Error("Server forced to shutdown", "error", err)
+		os.Exit(1)
 	}
 
-	logger.Info("Server exited")
+	log.Info("Server exited")
 }

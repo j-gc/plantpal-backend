@@ -115,7 +115,7 @@ go test ./...
 
 ```bash
 # Install air for hot reload
-go install github.com/cosmtrek/air@latest
+go install github.com/air-verse/air@latest
 
 # Run with air
 air

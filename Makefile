@@ -1,4 +1,10 @@
-.PHONY: help build run test clean migrate-up migrate-down
+.PHONY: help build run test clean migrate-up migrate-down migrate-status migrate-create
+
+# Load .env file if it exists
+ifneq (,$(wildcard ./.env))
+    include .env
+    export
+endif
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -48,3 +54,27 @@ docker-build: ## Build Docker image
 
 docker-run: ## Run Docker container
 	@docker run -p 8080:8080 --env-file .env plantpal-backend:latest
+
+docker-up: ## Start all services with docker-compose
+	@docker compose up -d
+
+docker-down: ## Stop all services
+	@docker compose down
+
+docker-logs: ## View logs from all services
+	@docker compose logs -f
+
+docker-rebuild: ## Rebuild and restart services
+	@docker compose up -d --build
+
+migrate-up: ## Run all pending migrations
+	@goose -dir migrations postgres "$(DATABASE_URL)" up
+
+migrate-down: ## Rollback the last migration
+	@goose -dir migrations postgres "$(DATABASE_URL)" down
+
+migrate-status: ## Show migration status
+	@goose -dir migrations postgres "$(DATABASE_URL)" status
+
+migrate-create: ## Create a new migration (usage: make migrate-create NAME=migration_name)
+	@goose -dir migrations create $(NAME) sql

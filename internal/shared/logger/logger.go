@@ -34,3 +34,9 @@ func New(level string) *Logger {
 		Logger: slog.New(handler),
 	}
 }
+
+// Fatal logs an error message and exits the program
+func (l *Logger) Fatal(msg string, args ...any) {
+	l.Error(msg, args...)
+	os.Exit(1)
+}
